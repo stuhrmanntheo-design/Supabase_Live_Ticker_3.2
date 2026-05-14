@@ -5,6 +5,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Spendenlauf – Eingabe</title>
+    <!-- jsQR-Bibliothek für QR-Code-Erkennung -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -254,6 +256,98 @@
         .recent-list .status.failed {
             color: #c53030;
         }
+
+        /* --- QR-Scanner-Bereich --- */
+        .scanner-section {
+            margin-bottom: 28px;
+            text-align: center;
+        }
+
+        .scanner-section label {
+            margin-bottom: 10px;
+        }
+
+        .scanner-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #1a202c;
+            border: 2px solid #e2e8f0;
+        }
+
+        .scanner-wrapper video,
+        .scanner-wrapper canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+        }
+
+        /* Unsichtbares Canvas für die Bildanalyse */
+        #scanCanvas { display: none; }
+
+        /* Fadenkreuz-Overlay */
+        .scanner-overlay {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 55%; height: 55%;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(255,255,255,0.5);
+            border-radius: 12px;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Grüner Erfolgs-Flash */
+        .scanner-flash {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(72, 187, 120, 0.55);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .scanner-flash.active {
+            animation: flashPulse 0.5s ease-out forwards;
+        }
+
+        @keyframes flashPulse {
+            0%   { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        .scanner-hint {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #a0aec0;
+        }
+
+        .scanner-hint.cooldown {
+            color: #b7791f;
+        }
+
+        /* Trennlinie zwischen Scanner und manueller Eingabe */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            color: #a0aec0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            border-top: 1px solid #e2e8f0;
+        }
     </style>
 </head>
 
@@ -264,7 +358,21 @@
     <div class="card">
         <div class="logo">🏃</div>
         <h1>Stempelstation</h1>
-        <p class="subtitle">Startnummer des Läufers eingeben</p>
+        <p class="subtitle">QR-Code scannen oder Startnummer eingeben</p>
+
+        <!-- QR-Scanner-Bereich -->
+        <div class="scanner-section">
+            <label>QR-Scanner</label>
+            <div class="scanner-wrapper" id="scannerWrapper">
+                <video id="scanVideo" autoplay playsinline muted></video>
+                <canvas id="scanCanvas"></canvas>
+                <div class="scanner-overlay"></div>
+                <div class="scanner-flash" id="scannerFlash"></div>
+            </div>
+            <p class="scanner-hint" id="scannerHint">📷 Kamera wird gestartet…</p>
+        </div>
+
+        <div class="divider">oder manuell</div>
 
         <form id="form" onsubmit="submitEntry(event)">
             <label for="startnummer">Startnummer</label>
@@ -289,6 +397,105 @@
         const SUPABASE_KEY = "sb_publishable_1AygBbbCKu6HkMtnPTc4wA_D0RNV0vk";
 
         const recent = [];
+
+        // ── QR-Scanner ───────────────────────────────────────
+        const SCAN_COOLDOWN_MS = 2000;   // Sperrzeit nach erfolgreichem Scan
+        let scannerActive = false;
+        let lastScanTime = 0;
+
+        /** Kamera starten und Scan-Schleife einrichten */
+        async function initScanner() {
+            const video = document.getElementById('scanVideo');
+            const hint  = document.getElementById('scannerHint');
+
+            try {
+                // Rückkamera bevorzugen (Handy/Tablet)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                await video.play();
+                scannerActive = true;
+                hint.textContent = '📷 QR-Code in den Rahmen halten';
+                requestAnimationFrame(scanLoop);
+            } catch (err) {
+                console.warn('Kamera nicht verfügbar:', err);
+                hint.textContent = '⚠ Kamera nicht verfügbar – bitte manuelle Eingabe nutzen';
+            }
+        }
+
+        /** Dauerhaft laufende Scan-Schleife (per requestAnimationFrame) */
+        function scanLoop() {
+            if (!scannerActive) return;
+
+            const video  = document.getElementById('scanVideo');
+            const canvas = document.getElementById('scanCanvas');
+            const ctx    = canvas.getContext('2d', { willReadFrequently: true });
+
+            // Nur scannen wenn Video bereit ist
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width  = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: 'dontInvert'
+                });
+
+                if (code && code.data) {
+                    handleScanResult(code.data.trim());
+                }
+            }
+
+            requestAnimationFrame(scanLoop);
+        }
+
+        /** Erkannten QR-Code verarbeiten */
+        function handleScanResult(data) {
+            const now = Date.now();
+
+            // Sperrzeit prüfen (Doppelscans verhindern)
+            if (now - lastScanTime < SCAN_COOLDOWN_MS) return;
+
+            // Nur reine Zahlen akzeptieren
+            if (!/^\d+$/.test(data)) return;
+
+            const startnummer = parseInt(data, 10);
+            if (startnummer < 1) return;
+
+            lastScanTime = now;
+
+            // Grünen Flash auslösen
+            triggerFlash();
+
+            // Runde eintragen (gleiche Logik wie manuelle Eingabe)
+            const zeit = new Date().toLocaleTimeString('de-DE');
+            showMessage(`✓ Scan: Startnummer ${startnummer} – Runde eingetragen!`, 'success');
+            const queueId = enqueue(startnummer);
+            addRecent(startnummer, zeit, queueId);
+
+            // Cooldown-Hinweis anzeigen
+            const hint = document.getElementById('scannerHint');
+            hint.textContent = '⏳ Kurz warten…';
+            hint.classList.add('cooldown');
+            setTimeout(() => {
+                hint.textContent = '📷 QR-Code in den Rahmen halten';
+                hint.classList.remove('cooldown');
+            }, SCAN_COOLDOWN_MS);
+        }
+
+        /** Grünen Erfolgs-Flash im Scanner-Fenster abspielen */
+        function triggerFlash() {
+            const flash = document.getElementById('scannerFlash');
+            flash.classList.remove('active');
+            // Reflow erzwingen damit die Animation erneut startet
+            void flash.offsetWidth;
+            flash.classList.add('active');
+        }
+
+        // Scanner beim Laden der Seite automatisch starten
+        document.addEventListener('DOMContentLoaded', initScanner);
 
         // ── Retry-Queue ──────────────────────────────────────
         const MAX_RETRIES = 3;
