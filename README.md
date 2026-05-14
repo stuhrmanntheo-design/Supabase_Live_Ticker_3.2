@@ -5,7 +5,8 @@ Stempelstationen tragen Runden ein – der Ticker zeigt die Rangliste sofort akt
 
 ## Dateien
 
-**eingabe.html** – Stempelstation  
+**eingabe.html** – Stempelstation 
+Mit QR Code Rundennummer Scannen.
 Läufer-Startnummer eingeben, Runde wird sofort in die Datenbank geschrieben.  
 Optimiert für schnelle Eingabe: Das Feld leert sich sofort, die nächste Nummer kann bereits eingetippt werden während die vorherige noch gespeichert wird.
 
