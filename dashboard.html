@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spendenlauf – Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0e1014;
+            --card: #14171d;
+            --card2: #1b1f27;
+            --border: #242a33;
+            --text: #e6e9ee;
+            --text-dim: #9aa3b2;
+            --text-muted: #5d6571;
+            --accent: #4f8ef7;
+            --gold: #d4a843;
+            --silver: #97a1b1;
+            --bronze: #bd8458;
+            --green: #3fb47f;
+            --red: #e25c5c;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+            font-feature-settings: 'tnum';
+        }
+
+        .container { max-width: 1720px; height: 100%; margin: 0 auto; padding: 20px 32px 8px; display: flex; flex-direction: column; }
+
+        /* ── Header ── */
+        .header { flex: none; display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+        .brand { display: flex; align-items: center; gap: 14px; }
+        .brand-mark { width: 38px; height: 38px; border-radius: 9px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; letter-spacing: 0.02em; }
+        .brand h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+        .brand .subtitle { font-size: 12px; color: var(--text-muted); font-weight: 500; margin-top: 1px; }
+        .header-right { display: flex; align-items: center; gap: 24px; }
+        .live { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; color: var(--red); }
+        .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: livePulse 2s ease-in-out infinite; }
+        @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+        .clock { font-size: 20px; font-weight: 600; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+        /* ── Statistiken ── */
+        .stats-bar { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 12px; }
+        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px 12px; }
+        .stat-card .label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+
+        /* ── Schnellste Runde ── */
+        .fastest-lap { flex: none; display: flex; align-items: center; gap: 20px; background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 10px; padding: 12px 22px; margin-bottom: 12px; }
+        .fl-label { font-size: 11px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 3px; }
+        .fl-name { font-size: 17px; font-weight: 700; }
+        .fl-name.empty { color: var(--text-muted); font-weight: 500; font-size: 14px; }
+        .fl-meta { font-size: 12px; color: var(--text-dim); margin-top: 1px; }
+        .fl-spacer { flex: 1; }
+        .fl-stat { text-align: right; padding-left: 36px; }
+        .fl-stat .num { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+        .fl-stat .lbl { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+        /* ── Panels ── */
+        .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .panel-header { flex: none; display: flex; align-items: baseline; justify-content: space-between; padding: 13px 20px 11px; border-bottom: 1px solid var(--border); }
+        .panel-header h2 { font-size: 13px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+        .panel-header .badge { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+        .panel-body { flex: 1; min-height: 0; padding: 8px 10px 10px; overflow: hidden; }
+
+        /* Top 10: Zeilen füllen die verfügbare Höhe gleichmäßig */
+        #panelRunners { display: flex; flex-direction: column; gap: 2px; }
+        #panelRunners .lb-row { flex: 1; min-height: 0; }
+        /* Klassen: 2 Spalten à 10 Zeilen, alle Klassen ohne Scrollen sichtbar */
+        #panelKlassen { display: grid; grid-template-rows: repeat(10, minmax(0, 1fr)); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px 10px; }
+        #panelKlassen .lb-row { min-height: 0; }
+
+        /* ── Zeilen ── */
+        .lb-row { position: relative; display: grid; align-items: center; padding: 4px 28px 4px 12px; border-radius: 8px; }
+        .lb-row:nth-child(even) { background: rgba(255,255,255,0.018); }
+        .lb-row.top-runner { grid-template-columns: 34px 1fr 96px 84px; gap: 10px; }
+        .lb-row.top-klasse { grid-template-columns: 30px 1fr auto; gap: 10px; }
+
+        .lb-rank { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; background: var(--card2); color: var(--text-muted); }
+        .lb-row.r1 .lb-rank { background: rgba(212,168,67,0.16); color: var(--gold); }
+        .lb-row.r2 .lb-rank { background: rgba(151,161,177,0.14); color: var(--silver); }
+        .lb-row.r3 .lb-rank { background: rgba(189,132,88,0.14); color: var(--bronze); }
+
+        .lb-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+        .lb-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; line-height: 1.25; }
+
+        .lb-rounds { font-size: 19px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .lb-rounds .unit { font-size: 11px; font-weight: 500; color: var(--text-muted); }
+        .lb-km { font-size: 13px; font-weight: 500; color: var(--text-dim); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .lb-km .unit { font-size: 11px; color: var(--text-muted); }
+        .lb-end { text-align: right; }
+        .lb-end .k-num { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; }
+        .lb-end .k-num .unit { font-size: 10px; font-weight: 500; color: var(--text-muted); }
+        .lb-end .k-km { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; }
+        #panelKlassen .lb-rank { width: 24px; height: 24px; font-size: 11px; border-radius: 6px; }
+        #panelKlassen .lb-name { font-size: 13px; }
+        #panelKlassen .lb-sub { font-size: 10px; }
+
+        /* Neue Runde gelaufen: kurzes grünes Aufleuchten + Pfeil nach oben */
+        .lb-row.changed { animation: rowFlash 1.4s ease; }
+        @keyframes rowFlash { 0% { background: rgba(63,180,127,0.16); } 100% { background: transparent; } }
+        .up-indicator { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--green); opacity: 0; pointer-events: none; }
+        .up-indicator.show { animation: floatUp 2.2s ease forwards; }
+        @keyframes floatUp {
+            0%   { opacity: 0; transform: translateY(calc(-50% + 7px)); }
+            18%  { opacity: 1; transform: translateY(-50%); }
+            75%  { opacity: 1; transform: translateY(-50%); }
+            100% { opacity: 0; transform: translateY(calc(-50% - 7px)); }
+        }
+
+        /* Einblenden beim ersten Laden */
+        .lb-row.entering { opacity: 0; animation: fadeIn 0.3s ease forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+        .empty-msg { text-align: center; padding: 32px; color: var(--text-muted); font-size: 13px; }
+
+        .footer { flex: none; text-align: center; padding: 7px 0 2px; font-size: 11px; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="brand">
+                <div class="brand-mark">SL</div>
+                <div>
+                    <h1>Spendenlauf</h1>
+                    <div class="subtitle">Live-Dashboard</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="live"><span class="live-dot"></span>LIVE</div>
+                <div class="clock" id="clock">--:--:--</div>
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-card"><div class="label">Läufer</div><div class="value" id="sLaeufer">–</div></div>
+            <div class="stat-card"><div class="label">Runden gesamt</div><div class="value" id="sRunden">–</div></div>
+            <div class="stat-card"><div class="label">Meiste Runden</div><div class="value" id="sTop">–</div></div>
+            <div class="stat-card"><div class="label">Klassen</div><div class="value" id="sKlassen">–</div></div>
+            <div class="stat-card"><div class="label">Kilometer gesamt</div><div class="value" id="sKm">–</div></div>
+        </div>
+
+        <div class="fastest-lap">
+            <div>
+                <div class="fl-label">Schnellste Runde</div>
+                <div class="fl-name empty" id="flName">Noch keine Rundenzeit verfügbar</div>
+                <div class="fl-meta" id="flMeta"></div>
+            </div>
+            <div class="fl-spacer"></div>
+            <div class="fl-stat"><div class="num" id="flTime">–</div><div class="lbl">Rundenzeit</div></div>
+            <div class="fl-stat"><div class="num" id="flSpeed">–</div><div class="lbl">km/h</div></div>
+        </div>
+
+        <div class="grid">
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Top 10 Läufer</h2>
+                    <span class="badge">nach Runden</span>
+                </div>
+                <div class="panel-body" id="panelRunners">
+                    <div class="empty-msg">Warte auf Daten …</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>Klassenrangliste</h2>
+                    <span class="badge">Gesamtrunden</span>
+                </div>
+                <div class="panel-body" id="panelKlassen">
+                    <div class="empty-msg">Warte auf Daten …</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <span id="updateInfo">Letztes Update: –</span> · Aktualisierung alle 5 Sekunden
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = "https://bkgsgmvlwwihibxixmhl.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_1AygBbbCKu6HkMtnPTc4wA_D0RNV0vk";
+        const REFRESH_MS = 5000;
+        const RUNDEN_LAENGE_KM = 0.7;     // eine Runde = 700 m
+        const MIN_LAP_MS = 60 * 1000;     // Rundenzeiten unter 1 Minute = vermutlich Doppelstempel, ignorieren
+
+        /* Gecachte Klassenbloecke – wird einmalig beim Seitenstart geladen */
+        let klassenBloecke = [];
+
+        /**
+         * Lädt die Tabelle "klassenbloecke" einmalig.
+         * Jeder Block hat { klasse, start_nr, end_nr }.
+         */
+        async function ladeKlassenbloecke() {
+            const res = await fetch(
+                `${SUPABASE_URL}/rest/v1/klassenbloecke?select=klasse,start_nr,end_nr`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+            );
+            if (!res.ok) throw new Error('Klassenbloecke laden fehlgeschlagen');
+            klassenBloecke = await res.json();
+        }
+
+        /**
+         * Ermittelt die Klasse für eine Startnummer per Bereichsvergleich
+         * gegen die gecachten Klassenbloecke.
+         * Gibt "Unbekannt" zurück, falls kein passender Block existiert.
+         */
+        function klasseVonStartnummer(nr) {
+            const n = parseInt(nr);
+            const block = klassenBloecke.find(b => n >= b.start_nr && n <= b.end_nr);
+            return block ? block.klasse : 'Unbekannt';
+        }
+
+        /** Lädt nur die Runden-Tabelle (kein laeufer-Lookup mehr nötig) */
+        async function fetchRunden() {
+            const res = await fetch(
+                `${SUPABASE_URL}/rest/v1/runden?select=startnummer,eingetragen_am`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+            );
+            if (!res.ok) throw new Error('Runden laden fehlgeschlagen');
+            return res.json();
+        }
+
+        function processData(runden) {
+            const counts = {};
+            runden.forEach(r => { counts[r.startnummer] = (counts[r.startnummer] || 0) + 1; });
+
+            // Top-Läufer – Name wird durch "Startnummer #X" ersetzt
+            const runners = Object.entries(counts)
+                .map(([nr, rd]) => ({
+                    nr: parseInt(nr),
+                    runden: rd,
+                    name: `Startnummer #${nr}`,
+                    klasse: klasseVonStartnummer(nr)
+                }))
+                .sort((a, b) => b.runden - a.runden);
+
+            // Klassenrangliste per Bereichsvergleich aufbauen
+            const klassenData = {};
+            Object.entries(counts).forEach(([nr, count]) => {
+                const kl = klasseVonStartnummer(nr);
+                if (!klassenData[kl]) klassenData[kl] = { runden: 0, laeufer: new Set() };
+                klassenData[kl].runden += count;
+                klassenData[kl].laeufer.add(parseInt(nr));
+            });
+            const klassen = Object.entries(klassenData)
+                .map(([kl, d]) => ({
+                    klasse: kl,
+                    runden: d.runden,
+                    anzahl: d.laeufer.size,
+                    avg: d.laeufer.size > 0 ? (d.runden / d.laeufer.size).toFixed(1) : '0'
+                }))
+                .sort((a, b) => b.runden - a.runden);
+
+            const fastest = computeFastestLap(runden);
+
+            return {
+                runners,
+                klassen,
+                totalRunden: runden.length,
+                totalLaeufer: Object.keys(counts).length,
+                totalKlassen: klassen.length,
+                fastest
+            };
+        }
+
+        /**
+         * Schnellste Runde: kleinste Zeitdifferenz zwischen zwei
+         * aufeinanderfolgenden Stempeln desselben Läufers.
+         */
+        function computeFastestLap(runden) {
+            const byRunner = {};
+            runden.forEach(r => {
+                if (!r.eingetragen_am) return;
+                const t = new Date(r.eingetragen_am).getTime();
+                if (isNaN(t)) return;
+                (byRunner[r.startnummer] = byRunner[r.startnummer] || []).push(t);
+            });
+
+            let best = null;
+            Object.entries(byRunner).forEach(([nr, times]) => {
+                times.sort((a, b) => a - b);
+                for (let i = 1; i < times.length; i++) {
+                    const diff = times[i] - times[i - 1];
+                    if (diff < MIN_LAP_MS) continue;
+                    if (!best || diff < best.ms) best = { nr: parseInt(nr), ms: diff };
+                }
+            });
+            if (!best) return null;
+
+            const sec = best.ms / 1000;
+            const speedKmh = RUNDEN_LAENGE_KM / (sec / 3600);
+            return {
+                nr: best.nr,
+                name: `Startnummer #${best.nr}`,
+                klasse: klasseVonStartnummer(best.nr),
+                timeStr: formatLapTime(sec),
+                speedStr: speedKmh.toFixed(1).replace('.', ',')
+            };
+        }
+
+        function formatLapTime(sec) {
+            const m = Math.floor(sec / 60);
+            const s = Math.round(sec % 60);
+            return `${m}:${String(s).padStart(2, '0')}`;
+        }
+
+        let isFirstRender = true;
+
+        function render(data) {
+            const { runners, klassen, totalRunden, totalLaeufer, totalKlassen, fastest } = data;
+
+            animateStat('sLaeufer', totalLaeufer);
+            animateStat('sRunden', totalRunden);
+            if (runners.length > 0) animateStat('sTop', runners[0].runden);
+            animateStat('sKlassen', totalKlassen);
+            animateStat('sKm', totalRunden * RUNDEN_LAENGE_KM, 1);
+
+            renderFastestLap(fastest);
+
+            const rPanel = document.getElementById('panelRunners');
+            const top10 = runners.slice(0, 10);
+            diffPanel(rPanel, top10, 'top-runner', (r, i) => ({
+                key: String(r.nr),
+                rank: i,
+                value: r.runden,
+                cells: [
+                    { cls: 'lb-rank', text: String(i + 1) },
+                    { cls: 'lb-info', html: `<div class="lb-name">${r.name}</div>` },
+                    { cls: 'lb-rounds', html: `${r.runden}<span class="unit"> Rd.</span>` },
+                    { cls: 'lb-km', html: `${(r.runden * RUNDEN_LAENGE_KM).toFixed(1).replace('.', ',')}<span class="unit"> km</span>` }
+                ]
+            }));
+
+            const kPanel = document.getElementById('panelKlassen');
+            diffPanel(kPanel, klassen, 'top-klasse', (k, i) => ({
+                key: k.klasse,
+                rank: i,
+                value: k.runden,
+                cells: [
+                    { cls: 'lb-rank', text: String(i + 1) },
+                    { cls: 'lb-info', html: `<div class="lb-name">${k.klasse}</div><div class="lb-sub">${k.anzahl} Läufer · Ø ${k.avg} Rd.</div>` },
+                    { cls: 'lb-end', html: `<div class="k-num">${k.runden}<span class="unit"> Rd.</span></div><div class="k-km">${(k.runden * RUNDEN_LAENGE_KM).toFixed(1).replace('.', ',')} km</div>` }
+                ]
+            }));
+
+            isFirstRender = false;
+        }
+
+        function renderFastestLap(fastest) {
+            const nameEl = document.getElementById('flName');
+            if (!fastest) {
+                nameEl.classList.add('empty');
+                nameEl.textContent = 'Noch keine Rundenzeit verfügbar';
+                document.getElementById('flMeta').textContent = '';
+                document.getElementById('flTime').textContent = '–';
+                document.getElementById('flSpeed').textContent = '–';
+                return;
+            }
+            nameEl.classList.remove('empty');
+            updateText('flName', fastest.name);
+            updateText('flMeta', `Klasse ${fastest.klasse} · 700 m`);
+            updateText('flTime', fastest.timeStr);
+            updateText('flSpeed', fastest.speedStr);
+        }
+
+        function updateText(id, value) {
+            const el = document.getElementById(id);
+            const str = String(value);
+            if (el.textContent !== str) el.textContent = str;
+        }
+
+        /** Stat-Wert mit Hochzähl-Animation aktualisieren */
+        function animateStat(id, target, decimals = 0) {
+            const el = document.getElementById(id);
+            const prev = parseFloat(el.dataset.val);
+            if (prev === target) return;
+            el.dataset.val = target;
+
+            const start = isNaN(prev) ? 0 : prev;
+            const t0 = performance.now();
+            const dur = 600;
+
+            function frame(t) {
+                const p = Math.min(1, (t - t0) / dur);
+                const eased = 1 - Math.pow(1 - p, 3);
+                const v = start + (target - start) * eased;
+                el.textContent = v.toFixed(decimals).replace('.', ',');
+                if (p < 1) requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        }
+
+        function diffPanel(panel, items, rowType, mapFn) {
+            const emptyMsg = panel.querySelector('.empty-msg');
+            if (items.length === 0) {
+                if (!emptyMsg) panel.innerHTML = '<div class="empty-msg">Noch keine Daten</div>';
+                return;
+            }
+            if (emptyMsg) emptyMsg.remove();
+
+            const existingRows = panel.querySelectorAll('.lb-row');
+            const existingMap = new Map();
+            existingRows.forEach(row => existingMap.set(row.dataset.key, row));
+
+            const newKeys = new Set();
+            items.forEach((item, i) => {
+                const mapped = mapFn(item, i);
+                newKeys.add(mapped.key);
+                let row = existingMap.get(mapped.key);
+                if (!row) {
+                    row = document.createElement('div');
+                    row.dataset.key = mapped.key;
+                    row.className = `lb-row ${rowType}`;
+                    mapped.cells.forEach(cell => {
+                        const div = document.createElement('div');
+                        div.className = cell.cls;
+                        row.appendChild(div);
+                    });
+                    if (isFirstRender) {
+                        row.classList.add('entering');
+                        row.style.animationDelay = `${i * 0.03}s`;
+                    }
+                    panel.appendChild(row);
+                }
+                row.classList.remove('r1', 'r2', 'r3');
+                if (mapped.rank < 3) row.classList.add(`r${mapped.rank + 1}`);
+                const cells = row.children;
+                mapped.cells.forEach((cell, ci) => {
+                    if (ci >= cells.length) return;
+                    const target = cells[ci];
+                    if (cell.html !== undefined) {
+                        if (target.innerHTML !== cell.html) target.innerHTML = cell.html;
+                    } else {
+                        if (target.textContent !== cell.text) target.textContent = cell.text;
+                    }
+                });
+                // Rundenzahl gestiegen → grünes Aufleuchten + Pfeil
+                const prevValue = parseFloat(row.dataset.value);
+                row.dataset.value = mapped.value;
+                if (!isFirstRender && existingMap.has(mapped.key) && !isNaN(prevValue) && mapped.value > prevValue) {
+                    flashRow(row);
+                }
+            });
+            existingMap.forEach((row, key) => { if (!newKeys.has(key)) row.remove(); });
+            items.forEach((item, i) => {
+                const mapped = mapFn(item, i);
+                const row = panel.querySelector(`.lb-row[data-key="${mapped.key}"]`);
+                if (row && panel.children[i] !== row) panel.insertBefore(row, panel.children[i]);
+            });
+        }
+
+        /** Grünes Aufleuchten + aufsteigender Pfeil, wenn eine Runde dazukommt */
+        function flashRow(row) {
+            row.classList.remove('changed');
+            void row.offsetWidth;
+            row.classList.add('changed');
+
+            let arrow = row.querySelector('.up-indicator');
+            if (!arrow) {
+                arrow = document.createElement('span');
+                arrow.className = 'up-indicator';
+                arrow.textContent = '▲';
+                row.appendChild(arrow);
+            }
+            arrow.classList.remove('show');
+            void arrow.offsetWidth;
+            arrow.classList.add('show');
+        }
+
+        function updateClock() {
+            document.getElementById('clock').textContent = new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        }
+
+        async function refresh() {
+            try {
+                const runden = await fetchRunden();
+                const data = processData(runden);
+                render(data);
+                document.getElementById('updateInfo').textContent = `Letztes Update: ${new Date().toLocaleTimeString('de-DE')}`;
+            } catch (err) { console.warn('Fetch failed:', err); }
+        }
+
+        /* Initialisierung: Klassenbloecke einmalig laden, dann Polling starten */
+        async function init() {
+            try {
+                await ladeKlassenbloecke();
+            } catch (err) {
+                console.warn('Klassenbloecke konnten nicht geladen werden:', err);
+            }
+            updateClock();
+            setInterval(updateClock, 1000);
+            refresh();
+            setInterval(refresh, REFRESH_MS);
+        }
+
+        init();
+    </script>
+</body>
+</html>
