@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Spendenlauf – Abmeldung</title>
+    <meta name="description" content="Abmeldestation fuer den Spendenlauf – QR-Code scannen oder Startnummer eingeben" />
+
+    <!-- ============================================================
+         Spendenlauf – Auscheck / Abmeldestation
+         ============================================================
+         Zweck:
+           Helfer melden Teilnehmer nach ihrem Lauf ab, indem sie
+           den QR-Code scannen oder die Startnummer manuell eingeben.
+
+         Ablauf:
+           1. QR-Code wird gescannt oder Startnummer manuell eingegeben
+           2. Pruefung gegen Supabase-Tabelle "auscheck" (bereits abgemeldet?)
+           3. Pruefung gegen Supabase-Tabelle "runden" (Runden vorhanden?)
+           4. Bestaetigungsdialog (mit Warnung bei Auffaelligkeiten)
+           5. Bei Bestaetigung: Startnummer in Tabelle "auscheck" schreiben
+
+         Technische Basis:
+           - jsQR fuer QR-Code-Erkennung
+           - Native Browser Camera-API
+           - Supabase REST-API (PostgREST)
+
+         Hinweise:
+           - Laeuft als statisches HTML auf GitHub Pages
+           - Primaer fuer mobile Geraete (Handy/Tablet) optimiert
+           - Keine Emojis in UI-Texten oder Code-Kommentaren
+    ============================================================ -->
+
+    <!-- jsQR-Bibliothek fuer QR-Code-Erkennung -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+    <style>
+        /* ── Grundlegendes Reset und Basis ── */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f0f4f8;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 24px;
+            padding-top: 40px;
+        }
+
+        /* ── Hauptkarte ── */
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+            padding: 32px 24px;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 22px;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+
+        /* ── QR-Scanner-Bereich ── */
+        .scanner-section {
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .scanner-section label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .scanner-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            border-radius: 14px;
+            overflow: hidden;
+            background: #1a202c;
+            border: 2px solid #e2e8f0;
+        }
+
+        .scanner-wrapper video,
+        .scanner-wrapper canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Unsichtbares Canvas fuer die Bildanalyse */
+        #scanCanvas {
+            display: none;
+        }
+
+        /* Fadenkreuz-Overlay im Scanner */
+        .scanner-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 55%;
+            height: 55%;
+            transform: translate(-50%, -50%);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 12px;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Gruener Erfolgs-Flash im Scanner-Bereich */
+        .scanner-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(72, 187, 120, 0.55);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .scanner-flash.active {
+            animation: flashPulse 0.5s ease-out forwards;
+        }
+
+        @keyframes flashPulse {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        .scanner-hint {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #718096;
+            min-height: 20px;
+        }
+
+        /* ── Trennlinie zwischen Scanner und manueller Eingabe ── */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            color: #a0aec0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        /* ── Manuelle Eingabe ── */
+        .manual-section label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        input[type="number"] {
+            flex: 1;
+            padding: 14px 16px;
+            font-size: 32px;
+            font-weight: 700;
+            text-align: center;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+            color: #1a202c;
+            -moz-appearance: textfield;
+        }
+
+        input::-webkit-inner-spin-button,
+        input::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+        }
+
+        input:focus {
+            border-color: #4299e1;
+        }
+
+        button.submit-btn {
+            padding: 14px 24px;
+            font-size: 18px;
+            font-weight: 700;
+            color: white;
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            white-space: nowrap;
+        }
+
+        button.submit-btn:active {
+            transform: scale(0.97);
+            opacity: 0.9;
+        }
+
+        button.submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* ── Erfolgs-Bestaetigung (grosser gruener Haken) ── */
+        .success-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(39, 103, 73, 0.88);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 5000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .success-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .success-overlay .checkmark {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            animation: popIn 0.3s ease-out;
+        }
+
+        .success-overlay .checkmark svg {
+            width: 56px;
+            height: 56px;
+            stroke: #276749;
+            stroke-width: 3;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .success-overlay .success-text {
+            color: white;
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ── Modal-Dialog fuer Bestaetigungs- und Warnabfragen ── */
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            padding: 20px;
+        }
+
+        .modal-backdrop.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-dialog {
+            background: white;
+            border-radius: 18px;
+            padding: 28px 24px 20px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+            transform: scale(0.92);
+            transition: transform 0.2s ease;
+        }
+
+        .modal-backdrop.visible .modal-dialog {
+            transform: scale(1);
+        }
+
+        .modal-dialog .modal-icon {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .modal-dialog .modal-icon svg {
+            width: 48px;
+            height: 48px;
+        }
+
+        .modal-dialog .modal-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1a202c;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .modal-dialog .modal-message {
+            font-size: 15px;
+            color: #4a5568;
+            text-align: center;
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }
+
+        .modal-dialog .modal-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Standard-Bestaetigungsdialog (blau) */
+        .modal-dialog.modal-normal .modal-title {
+            color: #2b6cb0;
+        }
+
+        .modal-dialog.modal-normal .btn-confirm {
+            background: linear-gradient(135deg, #4299e1, #3182ce);
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 17px;
+            font-weight: 700;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        /* Warnung: bereits abgemeldet (rot) */
+        .modal-dialog.modal-warning-red {
+            border: 3px solid #e53e3e;
+        }
+
+        .modal-dialog.modal-warning-red .modal-title {
+            color: #c53030;
+        }
+
+        .modal-dialog.modal-warning-red .btn-confirm {
+            background: linear-gradient(135deg, #e53e3e, #c53030);
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 17px;
+            font-weight: 700;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        /* Warnung: keine Runde erfasst (orange) */
+        .modal-dialog.modal-warning-orange {
+            border: 3px solid #dd6b20;
+        }
+
+        .modal-dialog.modal-warning-orange .modal-title {
+            color: #c05621;
+        }
+
+        .modal-dialog.modal-warning-orange .btn-confirm {
+            background: linear-gradient(135deg, #ed8936, #dd6b20);
+            color: white;
+            border: none;
+            padding: 16px;
+            font-size: 17px;
+            font-weight: 700;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        /* Abbrechen-/Nein-Buttons (gemeinsam) */
+        .modal-dialog .btn-cancel,
+        .modal-dialog .btn-abort {
+            background: #edf2f7;
+            color: #4a5568;
+            border: none;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .modal-dialog .btn-cancel:hover,
+        .modal-dialog .btn-abort:hover {
+            background: #e2e8f0;
+        }
+
+        .modal-dialog .btn-confirm:active,
+        .modal-dialog .btn-cancel:active,
+        .modal-dialog .btn-abort:active {
+            transform: scale(0.97);
+        }
+
+        /* ── Letzte Abmeldungen ── */
+        .recent {
+            margin-top: 24px;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 16px;
+        }
+
+        .recent h2 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+        }
+
+        .recent-list {
+            list-style: none;
+        }
+
+        .recent-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f7fafc;
+            font-size: 15px;
+        }
+
+        .recent-list li:last-child {
+            border-bottom: none;
+        }
+
+        .recent-list .nr {
+            font-weight: 700;
+            color: #2d3748;
+        }
+
+        .recent-list .ts {
+            color: #a0aec0;
+            font-size: 12px;
+        }
+
+        /* ── Ladeanzeige waehrend der Supabase-Pruefung ── */
+        .loading-hint {
+            text-align: center;
+            color: #718096;
+            font-size: 14px;
+            padding: 12px 0;
+            display: none;
+        }
+
+        .loading-hint.visible {
+            display: block;
+        }
+
+        /* ── Fehlermeldungen ── */
+        .error-message {
+            margin-top: 12px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            background: #fed7d7;
+            color: #c53030;
+            display: none;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- ── Erfolgs-Overlay (gruener Haken nach erfolgreicher Abmeldung) ── -->
+    <div class="success-overlay" id="successOverlay">
+        <div class="checkmark">
+            <svg viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12" />
+            </svg>
+        </div>
+        <div class="success-text" id="successText">Abgemeldet</div>
+    </div>
+
+    <!-- ── Bestaetigungs-/Warndialog (Modal) ── -->
+    <div class="modal-backdrop" id="modalBackdrop">
+        <div class="modal-dialog" id="modalDialog">
+            <div class="modal-icon" id="modalIcon"></div>
+            <div class="modal-title" id="modalTitle"></div>
+            <div class="modal-message" id="modalMessage"></div>
+            <div class="modal-buttons" id="modalButtons"></div>
+        </div>
+    </div>
+
+    <!-- ── Hauptinhalt ── -->
+    <div class="card">
+        <h1>Abmeldestation</h1>
+        <p class="subtitle">QR-Code scannen oder Startnummer eingeben</p>
+
+        <!-- QR-Scanner-Bereich -->
+        <div class="scanner-section">
+            <label>QR-Scanner</label>
+            <div class="scanner-wrapper" id="scannerWrapper">
+                <video id="scanVideo" autoplay playsinline muted></video>
+                <canvas id="scanCanvas"></canvas>
+                <div class="scanner-overlay"></div>
+                <div class="scanner-flash" id="scannerFlash"></div>
+            </div>
+            <p class="scanner-hint" id="scannerHint">Kamera wird gestartet ...</p>
+        </div>
+
+        <div class="divider">oder manuell</div>
+
+        <!-- Manuelle Eingabe als Fallback -->
+        <div class="manual-section">
+            <label for="startnummer">Startnummer</label>
+            <div class="input-row">
+                <input type="number" id="startnummer" placeholder="42" min="1" required />
+                <button type="button" class="submit-btn" id="submitBtn" onclick="handleManualInput()">
+                    Abmelden
+                </button>
+            </div>
+        </div>
+
+        <!-- Ladeanzeige waehrend der Pruefung -->
+        <div class="loading-hint" id="loadingHint">Daten werden geprueft ...</div>
+
+        <!-- Fehlermeldungen -->
+        <div class="error-message" id="errorMessage"></div>
+
+        <!-- Liste der letzten Abmeldungen -->
+        <div class="recent">
+            <h2>Zuletzt abgemeldet</h2>
+            <ul class="recent-list" id="recentList">
+                <li style="color:#a0aec0; font-size:14px;">Noch keine Abmeldungen.</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // ================================================================
+        //  Supabase-Konfiguration
+        // ================================================================
+        const SUPABASE_URL = "https://bkgsgmvlwwihibxixmhl.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_1AygBbbCKu6HkMtnPTc4wA_D0RNV0vk";
+
+        // ================================================================
+        //  Globaler Zustand
+        // ================================================================
+        let scannerActive = false;   // Laeuft der Scanner gerade?
+        let scannerPaused = false;   // Scanner pausiert (z.B. waehrend Dialog)?
+        const recentEntries = [];    // Letzte Abmeldungen fuer die Anzeige
+
+        // ================================================================
+        //  QR-Scanner – Initialisierung
+        // ================================================================
+
+        /** Kamera starten und Scan-Schleife einrichten */
+        async function initScanner() {
+            const video = document.getElementById('scanVideo');
+            const hint = document.getElementById('scannerHint');
+
+            try {
+                // Rueckkamera bevorzugen (Handy/Tablet)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                await video.play();
+                scannerActive = true;
+                hint.textContent = 'QR-Code in den Rahmen halten';
+                requestAnimationFrame(scanLoop);
+            } catch (err) {
+                console.warn('Kamera nicht verfuegbar:', err);
+                hint.textContent = 'Kamera nicht verfuegbar – bitte manuelle Eingabe nutzen';
+            }
+        }
+
+        // ================================================================
+        //  QR-Scanner – Scan-Schleife
+        // ================================================================
+
+        /** Dauerhaft laufende Scan-Schleife (per requestAnimationFrame) */
+        function scanLoop() {
+            if (!scannerActive) return;
+
+            // Scanner pausiert? Trotzdem weiter die Schleife aufrufen,
+            // damit sie nach dem Fortsetzen sofort wieder laeuft
+            if (scannerPaused) {
+                requestAnimationFrame(scanLoop);
+                return;
+            }
+
+            const video = document.getElementById('scanVideo');
+            const canvas = document.getElementById('scanCanvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            // Nur scannen wenn Video bereit ist
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: 'dontInvert'
+                });
+
+                if (code && code.data) {
+                    const data = code.data.trim();
+                    // Nur reine Zahlen akzeptieren
+                    if (/^\d+$/.test(data)) {
+                        const startnummer = parseInt(data, 10);
+                        if (startnummer >= 1) {
+                            handleScannedNumber(startnummer);
+                        }
+                    }
+                }
+            }
+
+            requestAnimationFrame(scanLoop);
+        }
+
+        // ================================================================
+        //  QR-Scanner – Ergebnis verarbeiten
+        // ================================================================
+
+        /** Erkannte Startnummer aus dem Scanner verarbeiten */
+        async function handleScannedNumber(startnummer) {
+            // Scanner pausieren waehrend der Pruefung und des Dialogs
+            scannerPaused = true;
+            await processNumber(startnummer);
+            // Scanner wird in processNumber am Ende wieder freigegeben
+        }
+
+        // ================================================================
+        //  Manuelle Eingabe
+        // ================================================================
+
+        /** Manuelle Eingabe verarbeiten */
+        async function handleManualInput() {
+            const input = document.getElementById('startnummer');
+            const value = input.value.trim();
+
+            if (!value) return;
+
+            const startnummer = parseInt(value, 10);
+            if (isNaN(startnummer) || startnummer < 1) return;
+
+            // Scanner pausieren waehrend der Pruefung
+            scannerPaused = true;
+
+            // Eingabe-Button deaktivieren
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+
+            await processNumber(startnummer);
+
+            // Eingabefeld leeren und Fokus zuruecksetzen
+            input.value = '';
+            input.focus();
+            btn.disabled = false;
+        }
+
+        // Enter-Taste im Eingabefeld abfangen
+        document.addEventListener('DOMContentLoaded', function () {
+            document.getElementById('startnummer').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleManualInput();
+                }
+            });
+        });
+
+        // ================================================================
+        //  Hauptlogik: Startnummer pruefen und abmelden
+        // ================================================================
+
+        /**
+         * Zentrale Verarbeitung einer Startnummer:
+         * 1. Pruefung gegen "auscheck"-Tabelle (bereits abgemeldet?)
+         * 2. Pruefung gegen "runden"-Tabelle (Runden vorhanden?)
+         * 3. Passenden Bestaetigungsdialog anzeigen
+         * 4. Bei Bestaetigung: in "auscheck" schreiben
+         */
+        async function processNumber(startnummer) {
+            hideError();
+            showLoading(true);
+
+            try {
+                // Beide Pruefungen parallel ausfuehren fuer schnellere Antwort
+                const [auscheckResult, rundenResult] = await Promise.all([
+                    checkAuscheck(startnummer),
+                    checkRunden(startnummer)
+                ]);
+
+                showLoading(false);
+
+                // Prioritaet 1: Bereits abgemeldet (kritischste Warnung)
+                if (auscheckResult.alreadyCheckedOut) {
+                    const zeit = formatTime(auscheckResult.checkedOutAt);
+                    const confirmed = await showWarningDialog(
+                        'already-checked-out',
+                        'Bereits abgemeldet',
+                        `Startnummer ${startnummer} wurde bereits um ${zeit} abgemeldet. Trotzdem erneut abmelden?`,
+                        'Ja, trotzdem abmelden'
+                    );
+                    if (confirmed) {
+                        await doCheckout(startnummer);
+                    }
+                }
+                // Prioritaet 2: Keine Runden vorhanden
+                else if (!rundenResult.hasRounds) {
+                    const confirmed = await showWarningDialog(
+                        'no-rounds',
+                        'Keine Runden erfasst',
+                        `Fuer Startnummer ${startnummer} wurde noch keine Runde erfasst. Trotzdem abmelden?`,
+                        'Ja, trotzdem abmelden'
+                    );
+                    if (confirmed) {
+                        await doCheckout(startnummer);
+                    }
+                }
+                // Normalfall: Alles in Ordnung
+                else {
+                    const confirmed = await showConfirmDialog(
+                        `Startnummer ${startnummer} abmelden?`,
+                        'Ja, abmelden'
+                    );
+                    if (confirmed) {
+                        await doCheckout(startnummer);
+                    }
+                }
+            } catch (err) {
+                showLoading(false);
+                console.error('Fehler bei der Pruefung:', err);
+                showError('Verbindungsfehler – bitte erneut versuchen.');
+            }
+
+            // Scanner in jedem Fall wieder freigeben
+            scannerPaused = false;
+        }
+
+        // ================================================================
+        //  Supabase-Pruefungen
+        // ================================================================
+
+        /**
+         * Prueft ob die Startnummer bereits in der "auscheck"-Tabelle steht.
+         * Gibt zurueck: { alreadyCheckedOut: boolean, checkedOutAt: string|null }
+         */
+        async function checkAuscheck(startnummer) {
+            const url = `${SUPABASE_URL}/rest/v1/auscheck?startnummer=eq.${startnummer}&select=ausgecheckt_am&order=ausgecheckt_am.desc&limit=1`;
+
+            const res = await fetch(url, {
+                headers: {
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": `Bearer ${SUPABASE_KEY}`
+                }
+            });
+
+            if (!res.ok) throw new Error(`Auscheck-Pruefung fehlgeschlagen: HTTP ${res.status}`);
+
+            const data = await res.json();
+
+            if (data.length > 0) {
+                return {
+                    alreadyCheckedOut: true,
+                    checkedOutAt: data[0].ausgecheckt_am
+                };
+            }
+
+            return { alreadyCheckedOut: false, checkedOutAt: null };
+        }
+
+        /**
+         * Prueft ob fuer die Startnummer mindestens eine Runde in der
+         * "runden"-Tabelle existiert.
+         * Gibt zurueck: { hasRounds: boolean }
+         */
+        async function checkRunden(startnummer) {
+            const url = `${SUPABASE_URL}/rest/v1/runden?startnummer=eq.${startnummer}&select=startnummer&limit=1`;
+
+            const res = await fetch(url, {
+                headers: {
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": `Bearer ${SUPABASE_KEY}`
+                }
+            });
+
+            if (!res.ok) throw new Error(`Runden-Pruefung fehlgeschlagen: HTTP ${res.status}`);
+
+            const data = await res.json();
+            return { hasRounds: data.length > 0 };
+        }
+
+        // ================================================================
+        //  Abmeldung durchfuehren (POST an Supabase)
+        // ================================================================
+
+        /** Startnummer in die "auscheck"-Tabelle schreiben */
+        async function doCheckout(startnummer) {
+            showLoading(true);
+
+            try {
+                const res = await fetch(
+                    `${SUPABASE_URL}/rest/v1/auscheck`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "apikey": SUPABASE_KEY,
+                            "Authorization": `Bearer ${SUPABASE_KEY}`,
+                            "Prefer": "return=minimal"
+                        },
+                        body: JSON.stringify({ startnummer: startnummer })
+                    }
+                );
+
+                showLoading(false);
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                // Erfolgsmeldung anzeigen
+                showSuccessOverlay(startnummer);
+
+                // In die lokale Liste aufnehmen
+                const zeit = new Date().toLocaleTimeString('de-DE', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                addRecentEntry(startnummer, zeit);
+
+            } catch (err) {
+                showLoading(false);
+                console.error('Fehler beim Abmelden:', err);
+                showError('Abmeldung fehlgeschlagen – bitte erneut versuchen.');
+            }
+        }
+
+        // ================================================================
+        //  Modal-Dialoge
+        // ================================================================
+
+        /**
+         * Zeigt einen Warndialog mit rotem oder orangem Stil.
+         * type: 'already-checked-out' (rot) oder 'no-rounds' (orange)
+         * Gibt ein Promise zurueck: true bei Bestaetigung, false bei Abbruch
+         */
+        function showWarningDialog(type, title, message, confirmText) {
+            return new Promise(function (resolve) {
+                const backdrop = document.getElementById('modalBackdrop');
+                const dialog = document.getElementById('modalDialog');
+                const iconEl = document.getElementById('modalIcon');
+                const titleEl = document.getElementById('modalTitle');
+                const messageEl = document.getElementById('modalMessage');
+                const buttonsEl = document.getElementById('modalButtons');
+
+                // Stil setzen basierend auf Warn-Typ
+                dialog.className = 'modal-dialog';
+                if (type === 'already-checked-out') {
+                    dialog.classList.add('modal-warning-red');
+                    // Warndreieck-Symbol (rot)
+                    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#c53030" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+                } else {
+                    dialog.classList.add('modal-warning-orange');
+                    // Warndreieck-Symbol (orange)
+                    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#dd6b20" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+                }
+
+                titleEl.textContent = title;
+                messageEl.textContent = message;
+
+                // Buttons aufbauen
+                buttonsEl.innerHTML = '';
+
+                var btnConfirm = document.createElement('button');
+                btnConfirm.className = 'btn-confirm';
+                btnConfirm.textContent = confirmText;
+                btnConfirm.onclick = function () { hideModal(); resolve(true); };
+
+                var btnCancel = document.createElement('button');
+                btnCancel.className = 'btn-cancel';
+                btnCancel.textContent = 'Nein';
+                btnCancel.onclick = function () { hideModal(); resolve(false); };
+
+                var btnAbort = document.createElement('button');
+                btnAbort.className = 'btn-abort';
+                btnAbort.textContent = 'Abbrechen';
+                btnAbort.onclick = function () { hideModal(); resolve(false); };
+
+                buttonsEl.appendChild(btnConfirm);
+                buttonsEl.appendChild(btnCancel);
+                buttonsEl.appendChild(btnAbort);
+
+                // Dialog anzeigen
+                backdrop.classList.add('visible');
+            });
+        }
+
+        /**
+         * Zeigt den normalen Bestaetigungsdialog (blau).
+         * Gibt ein Promise zurueck: true bei Bestaetigung, false bei Abbruch
+         */
+        function showConfirmDialog(message, confirmText) {
+            return new Promise(function (resolve) {
+                const backdrop = document.getElementById('modalBackdrop');
+                const dialog = document.getElementById('modalDialog');
+                const iconEl = document.getElementById('modalIcon');
+                const titleEl = document.getElementById('modalTitle');
+                const messageEl = document.getElementById('modalMessage');
+                const buttonsEl = document.getElementById('modalButtons');
+
+                dialog.className = 'modal-dialog modal-normal';
+
+                // Abmelde-Symbol (blau)
+                iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#3182ce" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+
+                titleEl.textContent = 'Abmeldung bestaetigen';
+                messageEl.textContent = message;
+
+                // Buttons aufbauen
+                buttonsEl.innerHTML = '';
+
+                var btnConfirm = document.createElement('button');
+                btnConfirm.className = 'btn-confirm';
+                btnConfirm.textContent = confirmText;
+                btnConfirm.onclick = function () { hideModal(); resolve(true); };
+
+                var btnCancel = document.createElement('button');
+                btnCancel.className = 'btn-cancel';
+                btnCancel.textContent = 'Nein';
+                btnCancel.onclick = function () { hideModal(); resolve(false); };
+
+                var btnAbort = document.createElement('button');
+                btnAbort.className = 'btn-abort';
+                btnAbort.textContent = 'Abbrechen';
+                btnAbort.onclick = function () { hideModal(); resolve(false); };
+
+                buttonsEl.appendChild(btnConfirm);
+                buttonsEl.appendChild(btnCancel);
+                buttonsEl.appendChild(btnAbort);
+
+                backdrop.classList.add('visible');
+            });
+        }
+
+        /** Modal-Dialog ausblenden */
+        function hideModal() {
+            document.getElementById('modalBackdrop').classList.remove('visible');
+        }
+
+        // ================================================================
+        //  Erfolgs-Overlay (gruener Haken)
+        // ================================================================
+
+        /** Grossen gruenen Haken fuer 2 Sekunden anzeigen */
+        function showSuccessOverlay(startnummer) {
+            const overlay = document.getElementById('successOverlay');
+            const text = document.getElementById('successText');
+            text.textContent = 'Nr. ' + startnummer + ' abgemeldet';
+            overlay.classList.add('visible');
+
+            // Gruenen Flash im Scanner-Bereich ausloesen
+            triggerFlash();
+
+            setTimeout(function () {
+                overlay.classList.remove('visible');
+            }, 2000);
+        }
+
+        /** Gruenen Erfolgs-Flash im Scanner-Fenster abspielen */
+        function triggerFlash() {
+            const flash = document.getElementById('scannerFlash');
+            flash.classList.remove('active');
+            // Reflow erzwingen damit die Animation erneut startet
+            void flash.offsetWidth;
+            flash.classList.add('active');
+        }
+
+        // ================================================================
+        //  Hilfsfunktionen fuer die Anzeige
+        // ================================================================
+
+        /** Ladeanzeige ein-/ausblenden */
+        function showLoading(visible) {
+            const el = document.getElementById('loadingHint');
+            if (visible) {
+                el.classList.add('visible');
+            } else {
+                el.classList.remove('visible');
+            }
+        }
+
+        /** Fehlermeldung anzeigen */
+        function showError(text) {
+            const el = document.getElementById('errorMessage');
+            el.textContent = text;
+            el.classList.add('visible');
+            setTimeout(function () {
+                el.classList.remove('visible');
+            }, 5000);
+        }
+
+        /** Fehlermeldung sofort ausblenden */
+        function hideError() {
+            document.getElementById('errorMessage').classList.remove('visible');
+        }
+
+        /**
+         * Zeitstempel aus Supabase in lesbare Uhrzeit umwandeln.
+         * Erwartet einen ISO-Zeitstempel oder aehnliches Format.
+         */
+        function formatTime(timestamp) {
+            if (!timestamp) return 'unbekannter Uhrzeit';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString('de-DE', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (e) {
+                return 'unbekannter Uhrzeit';
+            }
+        }
+
+        // ================================================================
+        //  Liste der letzten Abmeldungen
+        // ================================================================
+
+        /** Neue Abmeldung in die lokale Liste aufnehmen */
+        function addRecentEntry(startnummer, zeit) {
+            recentEntries.unshift({ nr: startnummer, ts: zeit });
+            if (recentEntries.length > 10) recentEntries.pop();
+            renderRecent();
+        }
+
+        /** Liste der letzten Abmeldungen neu rendern */
+        function renderRecent() {
+            const list = document.getElementById('recentList');
+            if (recentEntries.length === 0) {
+                list.innerHTML = '<li style="color:#a0aec0; font-size:14px;">Noch keine Abmeldungen.</li>';
+                return;
+            }
+            list.innerHTML = recentEntries.map(function (entry) {
+                return '<li>'
+                    + '<span class="nr">#' + entry.nr + '</span>'
+                    + '<span class="ts">' + entry.ts + '</span>'
+                    + '</li>';
+            }).join('');
+        }
+
+        // ================================================================
+        //  Initialisierung
+        // ================================================================
+
+        // Scanner beim Laden der Seite automatisch starten
+        document.addEventListener('DOMContentLoaded', initScanner);
+    </script>
+
+</body>
+
+</html>
